@@ -27,6 +27,7 @@ extern csp_scheduler_t *csp_global_scheduler;
 void csp_scheduler_init(int num_workers);
 void csp_scheduler_stop(void);
 void csp_scheduler_submit(csp_proc_t *proc);
+void csp_scheduler_enqueue(csp_proc_t *proc);
 csp_proc_t *csp_scheduler_get_work(int worker_id);
 
 csp_proc_t *csp_proc_create(int stack_id, void (*func)(void *), void *arg);

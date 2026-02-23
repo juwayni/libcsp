@@ -62,10 +62,12 @@ void csp_scheduler_init(int num_workers) {
     pthread_mutex_init(&csp_global_scheduler->lock, NULL);
     pthread_cond_init(&csp_global_scheduler->cond, NULL);
 
-    for (int i = 0; i < num_workers; i++) {
+    // Worker 0 is the main thread
+    csp_global_scheduler->workers[0] = csp_worker_new(0);
+    csp_global_scheduler->workers[0]->tid = pthread_self();
+
+    for (int i = 1; i < num_workers; i++) {
         csp_global_scheduler->workers[i] = csp_worker_new(i);
-    }
-    for (int i = 0; i < num_workers; i++) {
         csp_worker_start(csp_global_scheduler->workers[i]);
     }
 
@@ -83,6 +85,17 @@ void csp_scheduler_init(int num_workers) {
     }
 }
 
+void csp_scheduler_enqueue(csp_proc_t *proc) {
+    while (!csp_grunq_try_push(csp_global_scheduler->global_runq, proc)) {
+        usleep(1);
+    }
+    pthread_mutex_lock(&csp_global_scheduler->lock);
+    if (csp_global_scheduler->idle_workers > 0) {
+        pthread_cond_signal(&csp_global_scheduler->cond);
+    }
+    pthread_mutex_unlock(&csp_global_scheduler->lock);
+}
+
 void csp_scheduler_submit(csp_proc_t *proc) {
     sigset_t mask, oldmask;
     sigemptyset(&mask);
@@ -94,17 +107,14 @@ void csp_scheduler_submit(csp_proc_t *proc) {
     csp_proc_extra_t *ex = self ? (csp_proc_extra_t *)self->extra : NULL;
     if (ex) ex->in_critical_section++;
 
-    uint64_t old_stat = csp_proc_stat_get(proc);
-    if (old_stat != csp_proc_stat_runnable) {
-        csp_proc_stat_set(proc, csp_proc_stat_runnable);
-        while (!csp_grunq_try_push(csp_global_scheduler->global_runq, proc)) {
-            usleep(1);
+    // Atomic CAS to ensure only one thread enqueues this process
+    while (1) {
+        uint64_t old_stat = csp_proc_stat_get(proc);
+        if (old_stat == csp_proc_stat_runnable) break; // Already in queue or about to be
+        if (csp_proc_stat_cas(proc, old_stat, csp_proc_stat_runnable)) {
+            csp_scheduler_enqueue(proc);
+            break;
         }
-        pthread_mutex_lock(&csp_global_scheduler->lock);
-        if (csp_global_scheduler->idle_workers > 0) {
-            pthread_cond_signal(&csp_global_scheduler->cond);
-        }
-        pthread_mutex_unlock(&csp_global_scheduler->lock);
     }
 
     if (ex) ex->in_critical_section--;
