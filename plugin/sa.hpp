@@ -221,7 +221,7 @@ public:
 
       /* The size of `csp_proc_t`. Cause we make %rbp to be 16-bytes alignment,
        * so we add extra 8-bytes if `sizeof(csp_procs_t) % 16 != 0`. */
-      size_t csp_proc_t_size = 22 << 3;
+      size_t csp_proc_t_size = 32 << 3;
 
       /* All parts of the process plus 8-bytes call instruction space. */
       su.max_stack_size += su.proc_reserved + csp_proc_t_size + 8;

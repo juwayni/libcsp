@@ -24,8 +24,8 @@ extern "C" {
 
 #include <stdatomic.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include "core.h"
-#include "timer.h"
 
 #define csp_sched_async(tasks)  csp_sched_run(false, tasks)
 #define csp_sched_sync(tasks)   csp_sched_run(true, tasks)
@@ -51,8 +51,6 @@ void csp_sched_yield(void);
 void csp_sched_hangup(uint64_t nanoseconds);
 void csp_sched_proc_anchor(bool need_sync) __attribute__((noinline));
 void csp_shced_atomic_incr(atomic_uint_fast64_t *cnt) __attribute__((noinline));
-
-extern _Thread_local csp_core_t *csp_this_core;
 
 #ifdef __cplusplus
 }

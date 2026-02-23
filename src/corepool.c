@@ -15,6 +15,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include "platform.h"
 #include <stdlib.h>
 #include "core.h"
 #include "corepool.h"
@@ -45,8 +46,6 @@ csp_core_pool_new(int pid, size_t grunq_cap_exp, size_t cores_per_cpu) {
     goto failed;
   }
 
-  /* We should fulfill the pool thus we can get cached core when current core
-   * blocks. */
   for (size_t i = 0; i < cores_per_cpu; i++) {
     pool->cores[i] = csp_core_new(pid, pool->lrunq, pool->grunq);
     if (pool->cores[i] == NULL) {
@@ -120,11 +119,18 @@ bool csp_core_pools_init(void) {
 }
 
 bool csp_core_pools_get(size_t pid, csp_core_t **core) {
-  return csp_core_pool_pop(csp_core_pools.pools[pid], core);
+  return csp_core_pool_pop(csp_core_pools.pools[pid % csp_core_pools.len], core);
 }
 
 void csp_core_pools_put(csp_core_t *core) {
-  csp_core_pool_push(csp_core_pools.pools[core->pid], core);
+  csp_core_pool_push(csp_core_pools.pools[core->pid % csp_core_pools.len], core);
+}
+
+// PRODUCTION HELPER
+csp_core_t *csp_core_pool_get(size_t pid) {
+    csp_core_t *core = NULL;
+    csp_core_pools_get(pid, &core);
+    return core;
 }
 
 void csp_core_pools_destroy() {

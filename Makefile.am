@@ -20,7 +20,9 @@ MAJOR_VERSION = `echo $(VERSION) | $(AWK) -F . '{print $$1}'`
 ACLOCAL_AMFLAGS = -I m4
 AM_CXXFLAGS = -I $(PLUGIN_DIR)/include
 AM_CFLAGS = -fplugin=.libs/libcspplugin.so.$(MAJOR_VERSION) \
-	-fplugin-arg-libcspplugin.so-building-libcsp=true
+	-fplugin-arg-libcspplugin.so-building-libcsp=true \
+	-fno-stack-protector \
+	-D_GNU_SOURCE -I$(srcdir)/src
 
 bin_PROGRAMS = cspcli
 lib_LTLIBRARIES = libcspplugin.la libcsp.la
@@ -31,11 +33,13 @@ libcspplugin_la_SOURCES = \
 	plugin/fs.hpp plugin/namer.hpp plugin/plugin.cpp plugin/proc.hpp plugin/sa.hpp
 
 libcsp_la_SOURCES = \
-	src/chan.h src/common.h src/cond.h src/core.h src/core.c src/corepool.h \
+	src/chan.h src/chan.c src/common.h src/cond.h src/core.h src/core.c src/corepool.h \
 	src/corepool.c src/csp.h src/mem.c src/monitor.c src/mutex.h src/netpoll.h \
 	src/netpoll.c src/proc.h src/proc.c src/rand.h src/rand.c src/rbq.h \
-	src/rbtree.h src/runq.h src/runq.c src/sched.h src/sched.c src/timer.h \
-	src/timer.c
+	src/rbtree.h src/runq.h src/runq.c src/csp_sched.h src/sched.c src/timer.h \
+	src/timer.c src/scheduler.h src/scheduler.c src/worker.h src/worker.c \
+	src/sync.h src/sync.c src/context.h src/context.c src/runtime.h src/runtime.c \
+	src/platform.h src/proc_extra.h
 
 libcspplugin_la_LDFLAGS = -version-number $(VERSION_NUMBER)
 libcsp_la_LDFLAGS	= -version-number $(VERSION_NUMBER) -pthread
@@ -47,8 +51,9 @@ install-data-hook:
 	rm -rf $(includedir)/libcsp $(datadir)/libcsp || true
 	$(MKDIR_P) $(includedir)/libcsp $(datadir)/libcsp
 	cp config.h src/chan.h src/common.h src/cond.h src/core.h src/csp.h \
-		src/mutex.h src/netpoll.h src/proc.h src/rbq.h src/runq.h src/sched.h \
-		src/timer.h $(includedir)/libcsp
+		src/mutex.h src/netpoll.h src/proc.h src/rbq.h src/runq.h src/csp_sched.h \
+		src/timer.h src/scheduler.h src/sync.h src/context.h src/runtime.h \
+		src/worker.h $(includedir)/libcsp
 	cp $(WORKING_DIR)/*.sf $(WORKING_DIR)/*.cg $(WORKING_DIR)/.session $(datadir)/libcsp
 
 uninstall-local:
