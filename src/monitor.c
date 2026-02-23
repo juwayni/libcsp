@@ -24,6 +24,9 @@
 #include "proc.h"
 #include "rand.h"
 #include "timer.h"
+#include "scheduler.h"
+
+extern csp_scheduler_t *csp_global_scheduler;
 
 /* 10ms */
 #define csp_monitor_max_sleep_microsecs 10000
@@ -67,8 +70,26 @@ bool csp_monitor_poll(int (*poll)(csp_proc_t **, csp_proc_t **)) {
     return false;
   }
 
+  if (csp_global_scheduler) {
+      csp_proc_t *p = start;
+      while (p) {
+          csp_proc_t *next = (csp_proc_t *)p->next;
+          p->next = p->pre = NULL;
+          csp_scheduler_submit(p);
+          if (p == end) break;
+          p = next;
+      }
+      return true;
+  }
+
   csp_core_t *core;
   if (csp_mmrbq_try_pop(core)(csp_sched_starving_procs, &core)) {
+    csp_proc_t *p = start;
+    while (p) {
+        csp_proc_stat_set(p, csp_proc_stat_runnable);
+        if (p == end) break;
+        p = (csp_proc_t *)p->next;
+    }
     csp_lrunq_set(core->lrunq, n, start, end);
     csp_cond_signal(&core->pcond, csp_cond_signal_proc_avail);
     return true;
@@ -78,6 +99,9 @@ bool csp_monitor_poll(int (*poll)(csp_proc_t **, csp_proc_t **)) {
     size_t num = csp_monitor_procs_put_list(start, csp_monitor_procs_len);
     if (num == 0) {
       break;
+    }
+    for (size_t i = 0; i < num; i++) {
+        csp_proc_stat_set(csp_monitor_procs[i], csp_proc_stat_runnable);
     }
     int pid = csp_rand(&csp_monitor_rand) % csp_sched_np;
     while (!csp_grunq_try_pushm(csp_core_pool(pid)->grunq,

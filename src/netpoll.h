@@ -23,6 +23,7 @@ extern "C" {
 #endif
 
 #include <stdbool.h>
+#include <sys/types.h>
 #include "proc.h"
 #include "timer.h"
 
@@ -33,6 +34,9 @@ bool csp_netpoll_register(int fd);
 int csp_netpoll_wait_read(int fd,  csp_timer_duration_t timeout);
 int csp_netpoll_wait_write(int fd, csp_timer_duration_t timeout);
 bool csp_netpoll_unregister(int fd);
+
+ssize_t csp_read(int fd, void *buf, size_t n);
+ssize_t csp_write(int fd, const void *buf, size_t n);
 
 #ifdef __cplusplus
 }

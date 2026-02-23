@@ -18,19 +18,27 @@
 #include <errno.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <stdlib.h>
 #include "common.h"
 #include "core.h"
 #include "corepool.h"
 #include "rbq.h"
 #include "runq.h"
-#include "sched.h"
+#include "csp_sched.h"
 #include "timer.h"
+#include "scheduler.h"
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
 
-extern size_t csp_cpu_cores;
+// Default values for globals if not provided by config.c
+size_t __attribute__((weak)) csp_cpu_cores = 0;
+size_t __attribute__((weak)) csp_max_threads = 1024;
+size_t __attribute__((weak)) csp_max_procs_hint = 100000;
+size_t __attribute__((weak)) csp_procs_num = 1;
+size_t __attribute__((weak)) csp_procs_size[] = { 65536, 65536, 65536, 65536 };
+
 extern _Thread_local csp_core_t *csp_this_core;
 
 extern void csp_core_init_main(csp_core_t *core);
@@ -56,63 +64,35 @@ csp_mmrbq_define(csp_core_t *, core);
 int csp_sched_np;
 csp_mmrbq_t(core) *csp_sched_starving_threads, *csp_sched_starving_procs;
 
-__attribute__((constructor)) static void csp_sched_start() {
-  /* Get the number of processores. */
-  csp_sched_np = sysconf(_SC_NPROCESSORS_ONLN);
-  if (csp_sched_np  <= 0) {
-    csp_sched_np = 1;
-  }
+static bool use_new_scheduler = false;
 
-  if (csp_cpu_cores > 0 && csp_cpu_cores < csp_sched_np) {
-    csp_sched_np = csp_cpu_cores;
-  }
+__attribute__((constructor)) static void csp_sched_start() {
+  csp_sched_np = sysconf(_SC_NPROCESSORS_ONLN);
+  if (csp_sched_np  <= 0) csp_sched_np = 1;
+  if (csp_cpu_cores > 0 && csp_cpu_cores < (size_t)csp_sched_np) csp_sched_np = (int)csp_cpu_cores;
 
   csp_sched_starving_threads = csp_mmrbq_new(core)(csp_exp(csp_sched_np));
-  if (csp_sched_starving_threads == NULL) {
-    errno = ENOMEM;
-    perror("Failed to initialize starving queue.");
-    exit(EXIT_FAILURE);
-  }
-
   csp_sched_starving_procs = csp_mmrbq_new(core)(csp_exp(csp_sched_np));
-  if (csp_sched_starving_procs == NULL) {
-    errno = ENOMEM;
-    perror("Failed to initialize starving queue.");
-    exit(EXIT_FAILURE);
-  }
 
-  if (!csp_core_pools_init()) {
-    errno = ENOMEM;
-    perror("Failed to initialize core pools.");
-    exit(EXIT_FAILURE);
-  }
-
+  csp_core_pools_init();
 #ifndef csp_with_sysmalloc
-  if (!csp_mem_init()) {
-    errno = ENOMEM;
-    perror("Failed to initialize mm.");
-    exit(EXIT_FAILURE);
-  }
+  csp_mem_init();
 #endif
+  csp_netpoll_init();
+  csp_timer_heaps_init();
+  csp_monitor_init();
 
-  if (!csp_netpoll_init()) {
-    perror("Failed to initialize netpoll.");
-    exit(EXIT_FAILURE);
-  }
-
-  if (!csp_timer_heaps_init()) {
-    errno = ENOMEM;
-    perror("Failed to initialize timer heaps.");
-    exit(EXIT_FAILURE);
-  }
-
-  if (!csp_monitor_init()) {
-    perror("Failed to initialize monitor.");
-    exit(EXIT_FAILURE);
+  if (getenv("LIBCSP_PRODUCTION")) {
+      use_new_scheduler = true;
+      csp_core_t *main_core;
+      csp_core_pools_get(0, &main_core);
+      csp_core_init_main(main_core);
+      csp_scheduler_init(csp_sched_np);
+      return;
   }
 
   csp_core_t *core;
-  for (size_t i = 0; i < csp_sched_np; i++) {
+  for (size_t i = 0; i < (size_t)csp_sched_np; i++) {
     csp_core_pools_get(i, &core);
     if (i == 0) {
       csp_core_init_main(core);
@@ -124,18 +104,39 @@ __attribute__((constructor)) static void csp_sched_start() {
 }
 
 void csp_sched_put_proc(csp_proc_t *proc) {
-  csp_lrunq_push_front(csp_this_core->lrunq, proc);
+  if (use_new_scheduler) {
+      csp_scheduler_submit(proc);
+  } else {
+      csp_lrunq_push_front(csp_this_core->lrunq, proc);
+  }
 }
 
-/* We must return the proc cause we may use it in `csp_timer_cancel`. */
 csp_proc_t *csp_sched_put_timer(csp_proc_t *proc) {
   csp_timer_put(csp_this_core->pid, proc);
   return proc;
 }
 
 csp_proc_t *csp_sched_get(csp_core_t *this_core) {
+  if (use_new_scheduler) {
+      csp_proc_t *old = (csp_proc_t *)this_core->running;
+      if (old && csp_proc_stat_get(old) == csp_proc_stat_running) {
+          csp_scheduler_submit(old);
+      }
+
+      while (true) {
+          csp_proc_t *p = csp_scheduler_get_work(this_core->pid);
+          if (p) return p;
+
+          pthread_mutex_lock(&csp_global_scheduler->lock);
+          csp_global_scheduler->idle_workers++;
+          pthread_cond_wait(&csp_global_scheduler->cond, &csp_global_scheduler->lock);
+          csp_global_scheduler->idle_workers--;
+          pthread_mutex_unlock(&csp_global_scheduler->lock);
+      }
+  }
+
   int pid, code;
-  csp_proc_t *running = this_core->running, *proc;
+  csp_proc_t *running = (csp_proc_t *)this_core->running, *proc;
 
   while (true) {
     code = csp_lrunq_try_pop_front(this_core->lrunq, &proc);
@@ -147,23 +148,13 @@ csp_proc_t *csp_sched_get(csp_core_t *this_core) {
 
     pid = this_core->pid;
     for (int i = 0; i < csp_sched_np; i++) {
-      if (csp_grunq_try_pop(csp_core_pool(pid)->grunq, &proc)) {
-        goto found;
-      }
-      if (++pid == csp_sched_np) {
-        pid = 0;
-      }
+      if (csp_grunq_try_pop(csp_core_pool(pid)->grunq, &proc)) goto found;
+      if (++pid == csp_sched_np) pid = 0;
     }
 
-    /* If stealing failed, we continue to run current proc if it's valid. */
-    if (running != NULL && csp_proc_nchild_get(running) == 0) {
-      return running;
-    }
+    if (running != NULL && csp_proc_nchild_get(running) == 0) return running;
 
-    /* We must call this before push it to the starving queue, otherwise there
-     * will be data race with monitor. */
     csp_cond_before_wait(&this_core->pcond);
-
     while(!csp_mmrbq_try_push(core)(csp_sched_starving_procs, this_core));
     if (csp_cond_wait(&this_core->pcond) == csp_cond_signal_deep_sleep) {
       pthread_mutex_lock(&this_core->mutex);
@@ -179,9 +170,7 @@ found:
   }
 
   size_t half = (csp_lrunq_len(this_core->lrunq) + 1) >> 1;
-  if (half == 0) {
-    return proc;
-  }
+  if (half == 0) return proc;
 
   csp_core_t *starving_core;
   if (csp_mmrbq_try_pop(core)(csp_sched_starving_procs, &starving_core)) {
@@ -195,35 +184,19 @@ found:
 
 void csp_sched_yield(void) {
   csp_core_t *this_core = csp_this_core;
-  csp_core_yield(this_core->running, &this_core->anchor);
+  csp_core_yield((csp_proc_t *)this_core->running, &this_core->anchor);
 }
 
 void csp_sched_hangup(uint64_t nanoseconds) {
-  if (csp_unlikely(nanoseconds == 0)) {
-    return;
-  }
-
+  if (nanoseconds == 0) return;
   csp_core_t *this_core = csp_this_core;
-  csp_proc_t *running = this_core->running;
+  csp_proc_t *running = (csp_proc_t *)this_core->running;
+  csp_proc_stat_set(running, csp_proc_stat_blocked);
   running->timer.when = csp_timer_now() + nanoseconds;
   csp_timer_put(this_core->pid, running);
-
-  // Set `this_core->running` to zero to prevent it be scheduled.
   this_core->running = NULL;
   csp_core_yield(running, &this_core->anchor);
 }
 
-__attribute__((noinline)) void csp_sched_proc_anchor(bool need_sync) {};
-
-__attribute__((noinline))
-void csp_shced_atomic_incr(atomic_uint_fast64_t *cnt) {};
-
-/* TODO: Directly release the resource without overhead may panic, so currently
- * we only rely on the OS to take back the resource. */
-__attribute__((destructor)) static void csp_sched_stop(void) {
-  /* csp_core_pools_destroy(); */
-  /* csp_timer_events_pool_destroy(); */
-/* #ifndef csp_with_sysmalloc */
-  /* csp_mem_destroy(); */
-/* #endif */
-}
+__attribute__((noinline)) void csp_sched_proc_anchor(bool need_sync) {}
+__attribute__((noinline)) void csp_shced_atomic_incr(atomic_uint_fast64_t *cnt) {}

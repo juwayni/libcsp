@@ -212,6 +212,32 @@ bool csp_netpoll_unregister(int fd) {
   return true;
 }
 
+ssize_t csp_read(int fd, void *buf, size_t n) {
+    while (true) {
+        ssize_t r = read(fd, buf, n);
+        if (r >= 0) return r;
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            csp_netpoll_wait_read(fd, 0);
+            continue;
+        }
+        if (errno == EINTR) continue;
+        return r;
+    }
+}
+
+ssize_t csp_write(int fd, const void *buf, size_t n) {
+    while (true) {
+        ssize_t r = write(fd, buf, n);
+        if (r >= 0) return r;
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            csp_netpoll_wait_write(fd, 0);
+            continue;
+        }
+        if (errno == EINTR) continue;
+        return r;
+    }
+}
+
 void csp_netpoll_destroy() {
   for (int i = 0; i < csp_netpoll.waiters_cap; i++) {
     if (csp_netpoll.waiters[i].registered) {

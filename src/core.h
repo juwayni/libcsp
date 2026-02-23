@@ -1,34 +1,14 @@
-/*
- * Copyright (c) 2020, Yanhui Shi <lime.syh at gmail dot com>
- * All rights reserved.
- *
- * Permission to use, copy, modify, and/or distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
- * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
- * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
- * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
- */
-
 #ifndef LIBCSP_CORE_H
 #define LIBCSP_CORE_H
+
+#include "platform.h"
+#include "cond.h"
+#include "proc.h"
+#include "runq.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#include <pthread.h>
-#include <stdatomic.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include "cond.h"
-#include "proc.h"
-#include "runq.h"
 
 #define csp_core_state_set(c, s)    atomic_store(&(c)->state, (s))
 #define csp_core_state_get(c)       atomic_load(&(c)->state)
@@ -46,46 +26,51 @@ typedef enum {
   csp_core_state_running,
 } csp_core_state_t;
 
-typedef struct {
+typedef struct csp_core_s {
   /*
-   * `anchor` is used to save the the thread context in `csp_core_run`. So when
-   * a process finishes or yields, we can switch to this context and find the
-   * next process to run.
-   *
-   * NOTE: This is should be the first field of `csp_core_t` cause we used this
-   * `csp_core_run`.
+   * anchor saves the full callee-saved context of the scheduler thread.
+   * rbp (0x00), rsp (0x08), rip (0x10), rbx (0x18), r12 (0x20), r13 (0x28), r14 (0x30), r15 (0x38)
    */
-  struct { int64_t rbp, rsp, rip, rbx; } anchor;
+  struct { int64_t rbp, rsp, rip, rbx, r12, r13, r14, r15; } anchor;
 
-  /* Current process running on the core. */
-  csp_proc_t *running;
+  /* Current process running on the core. Offset: 0x40 */
+  struct csp_proc_s *running;
 
-  /* Id of the thread the core runs on. */
+  /* Id of the thread the core runs on. Offset: 0x48 */
   pthread_t tid;
 
-  /* The id of cpu processor with which the core binds. */
+  /* The id of cpu processor with which the core binds. Offset: 0x50 */
   size_t pid;
 
-  /* State of the core. */
+  /* State of the core. Offset: 0x58 */
   _Atomic csp_core_state_t state;
 
-  /* The local runq used by cores running on the same processor. */
+  /* The local runq. Offset: 0x60 */
   csp_lrunq_t *lrunq;
 
-  /* The global runq used by cores running on the same processor. */
+  /* The global runq. Offset: 0x68 */
   csp_grunq_t *grunq;
 
-  /* `mutex` and `cond` are used to do synchronization operations. */
+  /* Sync primitives. Offset: 0x70+ */
   pthread_mutex_t mutex;
   pthread_cond_t cond;
 
-  /* porc-level conditional variable. */
+  /* proc-level conditional variable. */
   csp_cond_t pcond;
+
+  /* NEW FIELDS FOR M:N SCHEDULER */
+  void *worker;
+
+  _Alignas(64) char _padding[64]; // Avoid false sharing
 } csp_core_t;
 
+extern _Thread_local csp_core_t *csp_this_core;
+
 bool csp_core_block_prologue(csp_core_t *core);
-void csp_core_block_epilogue(csp_core_t *core, csp_proc_t *proc)
+void csp_core_block_epilogue(csp_core_t *core, struct csp_proc_s *proc)
 __attribute__((naked));
+
+void csp_core_yield(struct csp_proc_s *proc, void *anchor) __attribute__((naked));
 
 #ifdef __cplusplus
 }

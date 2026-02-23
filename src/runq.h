@@ -18,14 +18,17 @@
 #ifndef LIBCSP_RUNQ_H
 #define LIBCSP_RUNQ_H
 
+#include "platform.h"
+#include "rbq.h"
+#include "mutex.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#include <stdlib.h>
-#include "proc.h"
-#include "rbq.h"
-#include "mutex.h"
+// Forward declaration
+struct csp_proc_s;
+typedef struct csp_proc_s csp_proc_t;
 
 #define csp_grunq_t          csp_mmrbq_t(proc)
 #define csp_grunq_new        csp_mmrbq_new(proc)
