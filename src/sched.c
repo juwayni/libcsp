@@ -187,7 +187,7 @@ void csp_sched_yield(void) {
   csp_core_yield((csp_proc_t *)this_core->running, &this_core->anchor);
 }
 
-void csp_sched_hangup(uint64_t nanoseconds) {
+void csp_csp_sched_hangup(uint64_t nanoseconds) {
   if (nanoseconds == 0) return;
   csp_core_t *this_core = csp_this_core;
   csp_proc_t *running = (csp_proc_t *)this_core->running;

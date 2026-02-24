@@ -21,7 +21,7 @@ int main() {
         async(compute_task(id));
     }
 
-    csp_sched_hangup(2 * csp_timer_second);
+    sched.hangup(2 * csp_timer_second);
     printf("Main finished\n");
     return 0;
 }

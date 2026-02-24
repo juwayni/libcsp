@@ -18,7 +18,7 @@ extern "C" {
 #define csp_sync    csp_sched_sync
 #define csp_block   csp_sched_block
 #define csp_yield   csp_sched_yield
-#define csp_hangup  csp_sched_hangup
+#define csp_hangup  sched.hangup
 
 /* Channel */
 #define chan_t              csp_gochan_t

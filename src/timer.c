@@ -24,6 +24,7 @@
 #include "chan.h"
 #include "scheduler.h"
 #include "csp_sched.h"
+#include <stdatomic.h>
 
 #define csp_timer_getclock() ({                                                \
   uint32_t high, low;                                                          \
@@ -120,14 +121,7 @@ static int csp_timer_heap_get(csp_timer_heap_t *heap, csp_proc_t **start, csp_pr
     csp_mutex_unlock(&heap->mutex);
     return 0;
   }
-  csp_timer_time_t clock = csp_timer_getclock(), curr_time;
-  csp_timer_duration_t duration = clock - heap->clock;
-  if (duration < CLOCKS_PER_SEC) {
-    curr_time = heap->time + (csp_timer_duration_t)(((double)duration / CLOCKS_PER_SEC) * csp_timer_second);
-  } else {
-    heap->clock = clock;
-    curr_time = heap->time = csp_timer_now();
-  }
+  csp_timer_time_t curr_time = csp_timer_now();
   int n = 0;
   csp_proc_t *head = NULL, *tail = NULL, *top;
   while (heap->len > 0 && (top = heap->procs[0])->timer.when <= curr_time) {
@@ -200,13 +194,14 @@ typedef struct {
     csp_gochan_t *ch;
     csp_timer_duration_t duration;
     bool periodic;
+    atomic_bool stopped;
 } timer_task_arg_t;
 
 static void timer_task(void *arg) {
     timer_task_arg_t *ta = (timer_task_arg_t *)arg;
-    while (true) {
-        csp_sched_hangup(ta->duration);
-        if (ta->ch->closed) break;
+    while (!atomic_load(&ta->stopped)) {
+        csp_csp_sched_hangup(ta->duration);
+        if (atomic_load(&ta->stopped) || ta->ch->closed) break;
         if (ta->periodic) {
             csp_gochan_try_send(ta->ch, NULL);
         } else {
@@ -221,6 +216,7 @@ csp_gochan_t *csp_time_after(csp_timer_duration_t d) {
     csp_gochan_t *ch = csp_gochan_new(1);
     timer_task_arg_t *ta = (timer_task_arg_t *)malloc(sizeof(timer_task_arg_t));
     ta->ch = ch; ta->duration = d; ta->periodic = false;
+    atomic_init(&ta->stopped, false);
     csp_proc_create(0, timer_task, ta);
     return ch;
 }
@@ -232,6 +228,7 @@ csp_ticker_t *csp_ticker_new(csp_timer_duration_t d) {
     ta->ch = ticker->ch;
     ta->duration = d;
     ta->periodic = true;
+    atomic_init(&ta->stopped, false);
     ticker->ta = ta;
     csp_proc_create(0, timer_task, ta);
     return ticker;
@@ -239,7 +236,7 @@ csp_ticker_t *csp_ticker_new(csp_timer_duration_t d) {
 
 void csp_ticker_stop(csp_ticker_t *ticker) {
     if (ticker) {
-        csp_gochan_close(ticker->ch);
-        // timer_task will see ta->ch->closed and break.
+        timer_task_arg_t *ta = (timer_task_arg_t *)ticker->ta;
+        atomic_store(&ta->stopped, true);
     }
 }

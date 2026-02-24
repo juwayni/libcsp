@@ -157,7 +157,6 @@ found:
 csp_proc_t *csp_proc_create(int stack_id, void (*func)(void *), void *arg) {
     csp_proc_t *proc = csp_proc_new(stack_id, false);
     proc->registers.caller_saved.rdi = (uintptr_t)arg;
-    proc->extra = csp_proc_extra_new();
     ((csp_proc_extra_t *)proc->extra)->preemptible = true;
 
     uintptr_t *stack = (uintptr_t *)proc->rbp;

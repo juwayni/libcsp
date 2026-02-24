@@ -21,6 +21,7 @@
 #include "core.h"
 #include "proc.h"
 #include "scheduler.h"
+#include "proc_extra.h"
 
 static_assert(offsetof(csp_proc_t, mxcsr) == 0x18, "csp_proc_t.mxcsr offset mismatch");
 static_assert(offsetof(csp_proc_t, rsp) == 0x20, "csp_proc_t.rsp offset mismatch");
@@ -72,6 +73,7 @@ csp_proc_t *csp_proc_new(int id, bool waited_by_parent) {
     proc->parent = NULL;
   }
   proc->pre = proc->next = NULL;
+  proc->extra = csp_proc_extra_new();
 
 #ifdef csp_enable_valgrind
   proc->valgrind_stack = VALGRIND_STACK_REGISTER(proc->base, proc);
@@ -174,6 +176,11 @@ __attribute__((naked)) void csp_async_preempt(void) {
 __attribute__((noinline)) void csp_proc_destroy(csp_proc_t *proc) {
   if (csp_global_scheduler) {
       atomic_fetch_sub(&csp_global_scheduler->num_procs, 1);
+  }
+
+  if (proc->extra) {
+      free(proc->extra);
+      proc->extra = NULL;
   }
 
 #ifdef csp_enable_valgrind

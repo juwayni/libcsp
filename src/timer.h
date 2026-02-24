@@ -17,7 +17,7 @@ extern "C" {
 
 #define csp_timer_now() ({                                                     \
   struct timespec ts;                                                          \
-  clock_gettime(CLOCK_REALTIME, &ts);                                          \
+  clock_gettime(CLOCK_MONOTONIC, &ts);                                         \
   (csp_timer_time_t)(ts.tv_sec * csp_timer_second + ts.tv_nsec);               \
 })                                                                             \
 

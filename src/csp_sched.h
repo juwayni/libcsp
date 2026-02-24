@@ -48,7 +48,7 @@ extern "C" {
 } while (0)                                                                    \
 
 void csp_sched_yield(void);
-void csp_sched_hangup(uint64_t nanoseconds);
+void csp_csp_sched_hangup(uint64_t nanoseconds);
 void csp_sched_proc_anchor(bool need_sync) __attribute__((noinline));
 void csp_shced_atomic_incr(atomic_uint_fast64_t *cnt) __attribute__((noinline));
 

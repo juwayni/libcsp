@@ -10,6 +10,6 @@ int main() {
     for (int i = 0; i < 4; i++) {
         async(task(NULL));
     }
-    csp_sched_hangup(100 * csp_timer_millisecond);
+    sched.hangup(100 * csp_timer_millisecond);
     return 0;
 }
