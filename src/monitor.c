@@ -103,10 +103,11 @@ bool csp_monitor_poll(int (*poll)(csp_proc_t **, csp_proc_t **)) {
     for (size_t i = 0; i < num; i++) {
         csp_proc_stat_set(csp_monitor_procs[i], csp_proc_stat_runnable);
     }
-    int pid = csp_rand(&csp_monitor_rand) % csp_sched_np;
+    int np = csp_sched_np > 0 ? csp_sched_np : 1;
+    int pid = csp_rand(&csp_monitor_rand) % np;
     while (!csp_grunq_try_pushm(csp_core_pool(pid)->grunq,
         csp_monitor_procs, num)) {
-      if (csp_unlikely(++pid >= csp_sched_np)) {
+      if (csp_unlikely(++pid >= np)) {
         pid = 0;
       }
     }

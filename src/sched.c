@@ -37,7 +37,7 @@ size_t __attribute__((weak)) csp_cpu_cores = 0;
 size_t __attribute__((weak)) csp_max_threads = 1024;
 size_t __attribute__((weak)) csp_max_procs_hint = 100000;
 size_t __attribute__((weak)) csp_procs_num = 1;
-size_t __attribute__((weak)) csp_procs_size[] = { 65536, 65536, 65536, 65536 };
+size_t __attribute__((weak)) csp_procs_size[] = { 256*1024, 256*1024, 256*1024, 256*1024 };
 
 extern _Thread_local csp_core_t *csp_this_core;
 
@@ -67,7 +67,7 @@ csp_mmrbq_t(core) *csp_sched_starving_threads, *csp_sched_starving_procs;
 static bool use_new_scheduler = false;
 
 __attribute__((constructor)) static void csp_sched_start() {
-  csp_sched_np = sysconf(_SC_NPROCESSORS_ONLN);
+  csp_sched_np = (int)sysconf(_SC_NPROCESSORS_ONLN);
   if (csp_sched_np  <= 0) csp_sched_np = 1;
   if (csp_cpu_cores > 0 && csp_cpu_cores < (size_t)csp_sched_np) csp_sched_np = (int)csp_cpu_cores;
 
@@ -187,7 +187,7 @@ void csp_sched_yield(void) {
   csp_core_yield((csp_proc_t *)this_core->running, &this_core->anchor);
 }
 
-void csp_csp_sched_hangup(uint64_t nanoseconds) {
+void csp_sched_hangup(uint64_t nanoseconds) {
   if (nanoseconds == 0) return;
   csp_core_t *this_core = csp_this_core;
   csp_proc_t *running = (csp_proc_t *)this_core->running;

@@ -12,6 +12,7 @@
 #include <unistd.h>
 
 csp_scheduler_t *csp_global_scheduler = NULL;
+static pthread_once_t scheduler_init_once = PTHREAD_ONCE_INIT;
 
 extern size_t csp_cpu_cores;
 extern size_t csp_procs_num;
@@ -51,8 +52,9 @@ static void *preempter_loop(void *arg) {
     return NULL;
 }
 
-void csp_scheduler_init(int num_workers) {
-    if (csp_global_scheduler) return;
+static void scheduler_init_internal(void) {
+    int num_workers = (int)sysconf(_SC_NPROCESSORS_ONLN);
+    if (num_workers <= 0) num_workers = 1;
 
     csp_global_scheduler = (csp_scheduler_t *)calloc(1, sizeof(csp_scheduler_t));
     csp_global_scheduler->num_workers = num_workers;
@@ -96,7 +98,15 @@ void csp_scheduler_enqueue(csp_proc_t *proc) {
     pthread_mutex_unlock(&csp_global_scheduler->lock);
 }
 
+void csp_scheduler_init(int num_workers) {
+    pthread_once(&scheduler_init_once, scheduler_init_internal);
+}
+
 void csp_scheduler_submit(csp_proc_t *proc) {
+    if (!csp_global_scheduler) {
+        csp_scheduler_init(0);
+    }
+
     sigset_t mask, oldmask;
     sigemptyset(&mask);
     sigaddset(&mask, SIGALRM);
@@ -122,6 +132,8 @@ void csp_scheduler_submit(csp_proc_t *proc) {
 }
 
 csp_proc_t *csp_scheduler_get_work(int worker_id) {
+    if (!csp_global_scheduler) return NULL;
+
     sigset_t mask, oldmask;
     sigemptyset(&mask);
     sigaddset(&mask, SIGALRM);
@@ -133,13 +145,8 @@ csp_proc_t *csp_scheduler_get_work(int worker_id) {
     if (csp_grunq_try_pop(csp_global_scheduler->global_runq, &proc)) {
         goto found;
     }
-    for (int i = 0; i < csp_global_scheduler->num_workers; i++) {
-        int target = (worker_id + i + 1) % csp_global_scheduler->num_workers;
-        csp_worker_t *tw = csp_global_scheduler->workers[target];
-        if (csp_lrunq_try_pop_front(tw->core->lrunq, &proc) == csp_lrunq_ok) {
-            goto found;
-        }
-    }
+    // Note: lrunq is not thread-safe for stealing. Rely on global queue for now.
+    pthread_sigmask(SIG_SETMASK, &oldmask, NULL);
     return NULL;
 
 found:

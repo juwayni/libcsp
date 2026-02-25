@@ -101,6 +101,10 @@ bool csp_core_pools_init(void) {
     return false;
   }
 
+  if (csp_sched_np <= 0) {
+      fprintf(stderr, "FATAL: csp_sched_np is %d\n", csp_sched_np);
+      exit(1);
+  }
   size_t grunq_cap_exp = csp_exp(csp_max_procs_hint / csp_sched_np);
   size_t cores_per_cpu = (csp_max_threads / csp_sched_np) +
     (!!(csp_max_threads % csp_sched_np));

@@ -26,12 +26,6 @@
 #include "csp_sched.h"
 #include <stdatomic.h>
 
-#define csp_timer_getclock() ({                                                \
-  uint32_t high, low;                                                          \
-  __asm__ __volatile__("rdtsc\n": "=d"(high), "=a"(low));                      \
-  ((int64_t)high << 32) | low;                                                 \
-})                                                                             \
-
 #define csp_timer_heap_default_cap 64
 #define csp_timer_heap_lte(heap, i, j)                                         \
   ((heap)->procs[i]->timer.when <= (heap)->procs[j]->timer.when)
@@ -55,7 +49,6 @@ bool csp_timer_heap_init(csp_timer_heap_t *heap, size_t pid) {
   heap->cap = csp_timer_heap_default_cap;
   heap->len = 0;
   heap->time = csp_timer_now();
-  heap->clock = csp_timer_getclock();
   heap->procs = (csp_proc_t **)malloc(sizeof(csp_proc_t *) * heap->cap);
   heap->token = (uint64_t)pid << 53;
   csp_mutex_init(&heap->mutex);
@@ -157,7 +150,9 @@ void csp_timer_heaps_destroy(void) {
 }
 
 void csp_timer_put(size_t pid, csp_proc_t *proc) {
-  csp_timer_heap_put(&csp_timer_heaps.heaps[pid % csp_timer_heaps.len], proc);
+  int len = csp_timer_heaps.len;
+  if (len <= 0) len = 1;
+  csp_timer_heap_put(&csp_timer_heaps.heaps[pid % len], proc);
 }
 
 int csp_timer_poll(csp_proc_t **start, csp_proc_t **end) {
@@ -200,7 +195,7 @@ typedef struct {
 static void timer_task(void *arg) {
     timer_task_arg_t *ta = (timer_task_arg_t *)arg;
     while (!atomic_load(&ta->stopped)) {
-        csp_csp_sched_hangup(ta->duration);
+        csp_sched_hangup(ta->duration);
         if (atomic_load(&ta->stopped) || ta->ch->closed) break;
         if (ta->periodic) {
             csp_gochan_try_send(ta->ch, NULL);
