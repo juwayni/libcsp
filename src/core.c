@@ -131,6 +131,7 @@ bool csp_core_start(csp_core_t *core) {
 
 __attribute__((naked)) void csp_core_yield(csp_proc_t *proc, void *anchor) {
   __asm__ __volatile__(
+    "movb $1, 0xa8(%rdi)\n" // Set yielding = true
     csp_proc_save("rdi")
     "mov %rsi, %rdi\n"
     "call csp_core_anchor_restore@plt\n"
@@ -218,17 +219,24 @@ void csp_core_destroy(csp_core_t *core) {
 extern void csp_scheduler_submit(csp_proc_t *proc);
 extern void csp_core_anchor_restore(void *anchor);
 
+#include "proc_extra.h"
+
+void csp_preempt_submit_and_resume(csp_proc_t *proc, void *anchor) {
+    csp_scheduler_submit(proc);
+    if (proc->extra) {
+        ((csp_proc_extra_t *)proc->extra)->preemptible = true;
+    }
+    csp_core_anchor_restore(anchor);
+}
+
 __attribute__((naked))
 void csp_preempt_switch_and_submit(uintptr_t rsp, uintptr_t rbp, csp_proc_t *proc, void *anchor) {
     __asm__ __volatile__(
         "mov %rdi, %rsp\n"
         "mov %rsi, %rbp\n"
-        "sub $16, %rsp\n"
-        "push %rcx\n"
-        "mov %rdx, %rdi\n"
-        "call csp_scheduler_submit@plt\n"
-        "pop %rdi\n"
-        "call csp_core_anchor_restore@plt\n"
+        "mov %rdx, %rdi\n" // proc
+        "mov %rcx, %rsi\n" // anchor
+        "jmp csp_preempt_submit_and_resume@plt\n"
     );
 }
 
@@ -236,6 +244,7 @@ void csp_preempt_helper(uintptr_t sp) {
     csp_core_t *core = csp_this_core;
     csp_proc_t *proc = (csp_proc_t *)core->running;
 
+    atomic_store(&proc->yielding, true);
     proc->rsp = sp;
     proc->is_new = 2; // Preempted
     __asm__ __volatile__("stmxcsr %0" : "=m"(proc->mxcsr));

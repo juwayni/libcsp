@@ -75,9 +75,6 @@ __attribute__((constructor)) static void csp_sched_start() {
   csp_sched_starving_procs = csp_mmrbq_new(core)(csp_exp(csp_sched_np));
 
   csp_core_pools_init();
-#ifndef csp_with_sysmalloc
-  csp_mem_init();
-#endif
   csp_netpoll_init();
   csp_timer_heaps_init();
   csp_monitor_init();
@@ -119,6 +116,9 @@ csp_proc_t *csp_sched_put_timer(csp_proc_t *proc) {
 csp_proc_t *csp_sched_get(csp_core_t *this_core) {
   if (use_new_scheduler) {
       csp_proc_t *old = (csp_proc_t *)this_core->running;
+      if (old) {
+          atomic_store(&old->yielding, false);
+      }
       if (old && csp_proc_stat_get(old) == csp_proc_stat_running) {
           csp_scheduler_submit(old);
       }

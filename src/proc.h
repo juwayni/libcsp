@@ -92,6 +92,7 @@ typedef struct csp_proc_s {
   uint64_t valgrind_stack;
 #endif
   void *extra;
+  atomic_bool yielding;
   char _padding[64]; // Avoid false sharing
 } csp_proc_t;
 

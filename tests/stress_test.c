@@ -4,8 +4,8 @@
 #include "csp.h"
 
 // Stress test: 100,000 goroutines, each doing some work and communicating
-#define NUM_GOROUTINES 1
-#define NUM_CHANNELS 1
+#define NUM_GOROUTINES 10000
+#define NUM_CHANNELS 100
 
 typedef struct {
     int id;

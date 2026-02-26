@@ -64,8 +64,8 @@ void bench_channel_ping_pong(int n) {
 
 void real_main(void *arg) {
     printf("--- libcsp Benchmarks ---\n");
-    bench_goroutine_creation(1000);
-    bench_channel_ping_pong(1000);
+    bench_goroutine_creation(100000);
+    bench_channel_ping_pong(100000);
     printf("Benchmarks completed successfully\n");
     exit(0);
 }

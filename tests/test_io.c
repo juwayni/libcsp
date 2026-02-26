@@ -29,12 +29,9 @@ void reader(void *arg) {
     }
 }
 
-int main() {
-    setenv("LIBCSP_PRODUCTION", "1", 1);
-    csp_scheduler_init(4);
-
+void real_main(void *arg) {
     int p[2];
-    if (pipe(p) < 0) { perror("pipe"); return 1; }
+    if (pipe(p) < 0) { perror("pipe"); exit(1); }
 
     csp_netpoll_register(p[0]);
     csp_netpoll_register(p[1]);
@@ -45,7 +42,17 @@ int main() {
     csp_proc_create(0, reader, &fd_r);
     csp_proc_create(0, writer, &fd_w);
 
-    sleep(2);
+    csp_hangup(2 * csp_timer_second);
     printf("FAILED: I/O test timed out\n"); fflush(stdout);
-    return 1;
+    exit(1);
+}
+
+int main() {
+    setenv("LIBCSP_PRODUCTION", "1", 1);
+    csp_proc_create(0, real_main, NULL);
+
+    extern void *csp_core_run(void *data);
+    extern _Thread_local csp_core_t *csp_this_core;
+    csp_core_run(csp_this_core);
+    return 0;
 }

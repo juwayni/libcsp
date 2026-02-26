@@ -75,6 +75,9 @@ csp_proc_t *csp_proc_new(int id, bool waited_by_parent) {
   proc->pre = proc->next = NULL;
   proc->extra = csp_proc_extra_new();
 
+  proc->mxcsr = 0x1f80;
+  proc->x87cw = 0x037f;
+
 #ifdef csp_enable_valgrind
   proc->valgrind_stack = VALGRIND_STACK_REGISTER(proc->base, proc);
 #endif

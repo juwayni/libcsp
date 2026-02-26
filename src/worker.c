@@ -1,10 +1,10 @@
-#define _GNU_SOURCE
 #include "worker.h"
 #include "scheduler.h"
 #include "core.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <signal.h>
 
 extern void csp_core_init_main(csp_core_t *core);
 extern void *csp_core_run(void *data);
@@ -24,6 +24,14 @@ void csp_worker_start(csp_worker_t *worker) {
 
 void *csp_worker_loop(void *arg) {
     csp_worker_t *worker = (csp_worker_t *)arg;
+
+    // Set up signal alt stack for preemption safety
+    stack_t ss;
+    ss.ss_sp = malloc(SIGSTKSZ);
+    ss.ss_size = SIGSTKSZ;
+    ss.ss_flags = 0;
+    sigaltstack(&ss, NULL);
+
     csp_core_run(worker->core);
     return NULL;
 }

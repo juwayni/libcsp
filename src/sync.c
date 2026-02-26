@@ -1,4 +1,3 @@
-#define _GNU_SOURCE
 #include "sync.h"
 #include "core.h"
 #include "scheduler.h"

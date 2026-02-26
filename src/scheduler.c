@@ -1,4 +1,3 @@
-#define _GNU_SOURCE
 #include "scheduler.h"
 #include "worker.h"
 #include "core.h"
@@ -33,6 +32,7 @@ static void preemption_handler(int sig, siginfo_t *si, void *uc) {
     csp_proc_extra_t *extra = (csp_proc_extra_t *)proc->extra;
 
     if (extra->preemptible && !extra->in_critical_section) {
+        extra->preemptible = false; // Disable until safely enqueued
         greg_t old_rip = ctx->uc_mcontext.gregs[REG_RIP];
         ctx->uc_mcontext.gregs[REG_RSP] -= 8;
         *(greg_t *)(ctx->uc_mcontext.gregs[REG_RSP]) = old_rip;
@@ -59,14 +59,24 @@ static void scheduler_init_internal(void) {
     csp_global_scheduler = (csp_scheduler_t *)calloc(1, sizeof(csp_scheduler_t));
     csp_global_scheduler->num_workers = num_workers;
     csp_global_scheduler->workers = (csp_worker_t **)calloc(num_workers, sizeof(csp_worker_t *));
-    csp_global_scheduler->global_runq = csp_grunq_new(16); // 2^16
+    csp_global_scheduler->global_runq = csp_grunq_new(18); // 2^18 (approx 256K)
 
     pthread_mutex_init(&csp_global_scheduler->lock, NULL);
     pthread_cond_init(&csp_global_scheduler->cond, NULL);
 
+    // Set up signal alt stack for Worker 0 (main thread)
+    stack_t ss;
+    ss.ss_sp = malloc(SIGSTKSZ);
+    ss.ss_size = SIGSTKSZ;
+    ss.ss_flags = 0;
+    sigaltstack(&ss, NULL);
+
     // Worker 0 is the main thread
-    csp_global_scheduler->workers[0] = csp_worker_new(0);
+    csp_global_scheduler->workers[0] = (csp_worker_t *)calloc(1, sizeof(csp_worker_t));
+    csp_global_scheduler->workers[0]->id = 0;
     csp_global_scheduler->workers[0]->tid = pthread_self();
+    csp_global_scheduler->workers[0]->core = csp_this_core;
+    if (csp_this_core) csp_this_core->worker = csp_global_scheduler->workers[0];
 
     for (int i = 1; i < num_workers; i++) {
         csp_global_scheduler->workers[i] = csp_worker_new(i);
@@ -74,7 +84,7 @@ static void scheduler_init_internal(void) {
     }
 
     struct sigaction sa;
-    sa.sa_flags = SA_SIGINFO;
+    sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
     sa.sa_sigaction = preemption_handler;
     sigemptyset(&sa.sa_mask);
     sigaction(SIGALRM, &sa, NULL);
@@ -89,7 +99,7 @@ static void scheduler_init_internal(void) {
 
 void csp_scheduler_enqueue(csp_proc_t *proc) {
     while (!csp_grunq_try_push(csp_global_scheduler->global_runq, proc)) {
-        usleep(1);
+        sched_yield();
     }
     pthread_mutex_lock(&csp_global_scheduler->lock);
     if (csp_global_scheduler->idle_workers > 0) {
@@ -105,6 +115,10 @@ void csp_scheduler_init(int num_workers) {
 void csp_scheduler_submit(csp_proc_t *proc) {
     if (!csp_global_scheduler) {
         csp_scheduler_init(0);
+    }
+
+    while (atomic_load(&proc->yielding)) {
+        sched_yield();
     }
 
     sigset_t mask, oldmask;
