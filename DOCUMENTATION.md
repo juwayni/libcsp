@@ -174,3 +174,51 @@ void worker(void *arg) {
     csp_sync_waitgroup_done(args->wg);
 }
 ```
+
+---
+
+## Foreign Function Interface (FFI)
+
+`libcsp` is designed to be highly portable and can be used to bring Go-class goroutines to other languages that support C FFI.
+
+### Nim Example
+Nim's `--mm:orc` memory management is highly compatible with `libcsp`'s stack-switching architecture.
+
+**`examples/nim_example.nim`**
+```nim
+import os
+
+type
+  CspGoChan = ptr object
+  CspProcFunc = proc(arg: pointer) {.noconv.}
+
+# Import C symbols from libcsp
+proc csp_proc_create(id: cint, fn: CspProcFunc, arg: pointer): pointer {.importc, header: "csp.h".}
+proc csp_gochan_new(cap: csize_t): CspGoChan {.importc, header: "csp.h".}
+proc csp_gochan_send(ch: CspGoChan, val: pointer): bool {.importc, header: "csp.h".}
+proc csp_gochan_recv(ch: CspGoChan, ok: ptr bool): pointer {.importc, header: "csp.h".}
+
+proc nim_worker(arg: pointer) {.noconv.} =
+  let ch = cast[CspGoChan](arg)
+  discard csp_gochan_send(ch, cast[pointer](42))
+
+# Compile with: nim c -d:danger --mm:orc -L:.libs -l:csp examples/nim_example.nim
+```
+
+### Zig Example
+Zig can import `libcsp` directly using `@cImport`, making it a powerful choice for systems programming with goroutines.
+
+**`examples/zig_example.zig`**
+```zig
+const std = @import("std");
+const c = @cImport({
+    @cInclude("csp.h");
+});
+
+fn zig_worker(arg: ?*anyopaque) callconv(.C) void {
+    const ch = @ptrCast(*c.csp_gochan_t, arg);
+    _ = c.csp_gochan_send(ch, @intToPtr(*anyopaque, 1234));
+}
+
+// Compile with: zig build-exe examples/zig_example.zig -I. -L.libs -lcsp -lpthread -fno-stack-check
+```
